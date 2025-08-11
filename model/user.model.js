@@ -10,8 +10,7 @@ const userSchema = new mongoose.Schema({
         ref : "User"
     }],
     sponsorId : {
-         type : mongoose.Schema.Types.ObjectId,
-        ref : "User"
+        type : String
     },
     level:[{
         type : mongoose.Schema.Types.ObjectId,
@@ -19,6 +18,10 @@ const userSchema = new mongoose.Schema({
     }],
     parentId : {
        type : mongoose.Schema.Types.ObjectId,
+        ref : "User"
+    },
+    upperline : {
+        type : mongoose.Schema.Types.ObjectId,
         ref : "User"
     },
     sponsorName : {

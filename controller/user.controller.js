@@ -3,25 +3,44 @@ const Leg = require("../model/leg.model.js")
 const generateUsername = require("../utils/username.generator.js")
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+
+
 exports.registerUser = async (req, res) => {
     try {
-        const { firstName, lastName, email, mobile, password, dob, gender, state, pincode, address } = req.body;
+        const {
+            firstName,
+            lastName,
+            email,
+            mobile,
+            password,
+            dob,
+            gender,
+            state,
+            pincode,
+            address,
+            sponsorId // sponsor username
+        } = req.body;
 
         const totalUsers = await User.countDocuments();
-
-        let sponsorId = null;
-        let parentId = null;
+        let sponsorUser = null;
+        let placementUser = null;
 
         if (totalUsers > 0) {
-            // Find last user with no partner
-            const lastUser = await User.findOne({ partners: { $size: 0 } }).sort({ _id: -1 });
-
-            if (!lastUser) {
-                return res.status(400).json({ message: "No eligible sponsor found" });
+            if (!sponsorId) {
+                return res.status(400).json({ message: "Sponsor username is required" });
             }
 
-            sponsorId = lastUser._id;
-            parentId = lastUser._id;
+            // Sponsor find karo
+            sponsorUser = await User.findOne({ username: sponsorId });
+            if (!sponsorUser) {
+                return res.status(400).json({ message: "Invalid sponsor username" });
+            }
+
+            // Placement logic: pehla user jiske partners ka size 0 hai
+            placementUser = await User.findOne({ partners: { $size: 0 } }).sort({ _id: 1 });
+            if (!placementUser) {
+                return res.status(400).json({ message: "No eligible placement found" });
+            }
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -38,31 +57,48 @@ exports.registerUser = async (req, res) => {
             state,
             pincode,
             address,
-            sponsorId,
-            parentId
+            sponsorId: sponsorUser ? sponsorUser.username : null,
+            sponsorName: sponsorUser ? `${sponsorUser.firstName} ${sponsorUser.lastName}` : null,
+            parentId: placementUser ? placementUser._id : null
         });
 
         await newUser.save();
 
-        // If not the first user
-        if (sponsorId) {
-            // Add to sponsor’s partners
-            await User.findByIdAndUpdate(sponsorId, { $push: { partners: newUser._id } });
+        // Agar pehla user nahi hai
+        if (sponsorUser && placementUser) {
 
-            // Add to all uplines' level arrays
-            let currentUpline = sponsorId;
+            if (sponsorUser._id.toString() === placementUser._id.toString()) {
+                // Same user — ek hi push
+                await User.findByIdAndUpdate(sponsorUser._id, {
+                    $push: { partners: newUser._id }
+                });
+            } else {
+                // Alag users — dono me push
+                await User.findByIdAndUpdate(sponsorUser._id, {
+                    $push: { partners: newUser._id }
+                });
+
+                await User.findByIdAndUpdate(placementUser._id, {
+                    $push: { partners: newUser._id }
+                });
+            }
+
+            // Level chain update
+            let currentUpline = placementUser._id;
             while (currentUpline) {
-                await User.findByIdAndUpdate(currentUpline, { $push: { level: newUser._id } });
+                await User.findByIdAndUpdate(currentUpline, {
+                    $push: { level: newUser._id }
+                });
 
                 const uplineUser = await User.findById(currentUpline).select("parentId");
                 if (!uplineUser || !uplineUser.parentId) break;
                 currentUpline = uplineUser.parentId;
             }
 
-            // Create Leg record
+            // Leg create
             await Leg.create({
                 userId: newUser._id,
-                parentId: parentId,
+                parentId: placementUser._id,
                 business: "0"
             });
         }
@@ -77,6 +113,10 @@ exports.registerUser = async (req, res) => {
         res.status(500).json({ message: "Server error" });
     }
 };
+
+
+
+
 
 
 exports.loginUser = async (req, res) => {
